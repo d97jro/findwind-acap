@@ -1,0 +1,361 @@
+#!/bin/sh -eu
+
+BASEDIR=$(readlink -f "$0")
+APPNAME=${BASEDIR##*/}
+BASEDIR=${BASEDIR%/*}
+BASEURL=http://${VAPIXHOST:-127.0.0.12}/axis-cgi
+UPDATE_INTERVAL=${UPDATE_INTERVAL:-120}
+FETCH_RETRY_DELAY=${FETCH_RETRY_DELAY:-10}
+FINDWIND_FONTS_DIR=${FINDWIND_FONTS_DIR:-$BASEDIR/fonts}
+FONT_FAMILY=${FONT_FAMILY:-Liberation Sans}
+
+# Get VAPIX credentials from the system D-Bus
+[ "${CREDENTIALS:-}" ] || {
+	USERNAME=findwind-vapix-user
+	CREDENTIALS=$(dbus-send --system \
+		--print-reply \
+		--dest=com.axis.HTTPConf1 \
+		/com/axis/HTTPConf1/VAPIXServiceAccounts1 \
+		com.axis.HTTPConf1.VAPIXServiceAccounts1.GetCredentials \
+		string:"$USERNAME")
+	CREDENTIALS=${CREDENTIALS#*\"}
+	CREDENTIALS=${CREDENTIALS%\"*}
+}
+
+# curl commands for VAPIX requests and FindWind SVG fetching, with appropriate
+# options for each use case
+CURLCMD="curl --anyauth -s -u $CREDENTIALS"
+FINDWIND_CURLCMD="curl -sS -f -k -L --http1.1 --connect-timeout 10 --max-time 30"
+
+# Function to print error messages to stderr in a conform way.
+croak() {
+	echo "ERROR: $*" >&2
+}
+
+# Function that does VAPIX requests and takes two input arguments, where
+# the first is the request and the second the CGI/API the request is to
+# be sent to.
+request() {
+	[ $# -eq 2 ] || {
+		croak "expected 2 parameters but got $#"
+		return 1
+	}
+
+	response=$($CURLCMD -H 'Content-Type: application/json' -d "$1" "$BASEURL/$2") || {
+		croak "curl command failed ($response)"
+		return 1
+	}
+	echo "$response"
+}
+
+# Check if the provided JSON response contains an error message.
+# If an error is found, it prints the error to stderr and returns 1.
+# If no error is present, it prints the JSON response to stdout and returns 0.
+# It takes one input argument, which is the JSON response string to validate.
+check_json_response() {
+	[ $# -eq 1 ] || {
+		croak "expected 1 parameter but got $#"
+		return 1
+	}
+
+	error=$(echo "$1" | jq -r '.error.message // empty')
+	[ -z "$error" ] || {
+		croak "$error"
+		return 1
+	}
+	echo "$1"
+}
+
+# Makes a JSON request to the specified endpoint and validates the response.
+# It takes two input arguments: the request payload and the CGI/API endpoint.
+# Prints the validated JSON response to stdout if successful, or an error
+# message to stderr (and returns 1) upon error.
+request_json() {
+	[ $# -eq 2 ] || {
+		croak "expected 2 parameters but got $#"
+		return 1
+	}
+
+	check_json_response "$(request "$1" "$2")"
+}
+
+# Use VAPIX to retrieve the value of a specified application parameter.
+get_param() {
+	[ "$#" -eq 1 ] || {
+		croak "expected 1 parameter but got $#"
+		return 1
+	}
+	response=$(curl --anyauth -s -u "$CREDENTIALS" "$BASEURL/param.cgi?action=list&group=root.$APPNAME.$1")
+	echo "${response#*=}"
+}
+
+# Uploads an image file to the camera using VAPIX and returns the overlay path.
+# It takes two input arguments: the file path of the image to upload and its
+# MIME type.
+upload_image() {
+	[ $# -eq 2 ] || {
+		croak "expected 2 parameters but got $#"
+		return 1
+	}
+
+	[ -f "$1" ] || {
+		croak "file $1 does not exist (or not accessible)"
+		return 1
+	}
+
+	[ -s "$1" ] || {
+		croak "file $1 is empty, refusing upload"
+		return 1
+	}
+
+	# Print to stderr to not contaminate output used for API call
+	echo "Uploading $1 ..." >&2
+	response=$(echo '{"apiVersion":"1.0","method":"uploadOverlayImage","params":{"scaleToResolution":true}}' | $CURLCMD --http1.0 -H 'Expect:' -F 'json=@-;type=application/json' -F "image=@$1;type=$2" "$BASEURL"/uploadoverlayimage.cgi) || {
+		croak "curl command failed ($response)"
+		return 1
+	}
+
+	checked_response=$(check_json_response "$response") || {
+		return 1
+	}
+
+	echo "$checked_response" | jq -r '.data.path // empty'
+}
+
+# Adds an overlay to the camera using the provided overlay path and position settings.
+# It takes one input argument: the overlay path returned from the upload_image
+# function.
+add_overlay() {
+	[ $# -eq 1 ] || {
+		croak "expected 1 parameter but got $#"
+		return 1
+	}
+
+	payload=$(jq -nc \
+		--arg overlay_path "$1" \
+		--arg position "$OVERLAY_POSITION" \
+		--arg custom_x "$CUSTOM_POSITION_X" \
+		--arg custom_y "$CUSTOM_POSITION_Y" \
+		'{"apiVersion":"1.0","method":"addImage","params":{"camera":1,"position":(if $position == "Custom" then [($custom_x|tonumber),($custom_y|tonumber)] else $position end),"overlayPath":$overlay_path}}') || {
+		croak "failed to construct addImage payload"
+		return 1
+	}
+
+	request_json "$payload" dynamicoverlay/dynamicoverlay.cgi
+}
+
+# Deletes an image from the camera using the provided overlay path.
+# It takes one input argument: the overlay path of the image to delete.
+delete_image() {
+	[ $# -eq 1 ] || {
+		croak "expected 1 parameter but got $#"
+		return 1
+	}
+
+	request_json "{\"apiVersion\": \"1.0\", \"method\": \"deleteImage\", \"params\": { \"path\": \"$1\"}}" manageoverlayimages.cgi
+}
+
+# Updates the image of an existing overlay using the provided identity and new
+# overlay path.
+# It takes two input arguments: the identity of the existing overlay and the
+# new overlay path returned from the upload_image function.
+set_overlay_image() {
+	[ $# -eq 2 ] || {
+		croak "expected 2 parameters but got $#"
+		return 1
+	}
+
+	payload=$(jq -nc \
+		--arg identity "$1" \
+		--arg overlay_path "$2" \
+		--arg position "$OVERLAY_POSITION" \
+		--arg custom_x "$CUSTOM_POSITION_X" \
+		--arg custom_y "$CUSTOM_POSITION_Y" \
+		'{"apiVersion":"1.0","method":"setImage","params":{"camera":1,"identity":($identity|tonumber),"overlayPath":$overlay_path,"position":(if $position == "Custom" then [($custom_x|tonumber),($custom_y|tonumber)] else $position end)}}') || {
+		croak "failed to construct setImage payload"
+		return 1
+	}
+
+	request_json "$payload" dynamicoverlay/dynamicoverlay.cgi 1>/dev/null
+}
+
+# Deletes an existing overlay from the camera using the provided identity.
+# It takes one input argument: the identity of the overlay to delete.
+delete_overlay() {
+	[ $# -eq 1 ] || {
+		croak "expected 1 parameter but got $#"
+		return 1
+	}
+
+	request_json "{\"apiVersion\": \"1.0\", \"method\": \"remove\", \"params\": { \"identity\": $1}}" dynamicoverlay/dynamicoverlay.cgi 1>/dev/null
+}
+
+# Downloads the SVG content from the FindWind service, processes it to render
+# fonts as vectors, and saves the resulting SVG to the temporary file stated
+# in the input argument. Prints an error message to stderr and returns 1 upon
+# failure.
+download_svg() {
+	[ $# -eq 1 ] || {
+		echo "Error: expected 1 parameter but got $#" >&2
+		return 1
+	}
+
+	svg=$($FINDWIND_CURLCMD "https://findwind.se/svg/Compound_${STYLE}_$SPOT.svg" 2>&1) || {
+		echo "Error: failed to download SVG ($svg)" >&2
+		return 1
+	}
+
+	echo "$svg" | grep -q '<svg' || {
+		echo "Error: downloaded content is not valid SVG" >&2
+		return 1
+	}
+
+	# Render fonts to vectors (since the camera overlay system doesn't do font rendering)
+	# Replace font-family with a known sans-serif font to improve chances of correct rendering (since the original font may not be available in the container)
+	# and set opacity on the first <g...> tag regardless of existing attributes.
+	echo "$svg" | \
+		sed -e "s#\(font-family='\)[^']*'#\1$FONT_FAMILY'#g" \
+			-e "s#\(font-family=\"\)[^\"]*\"#\1$FONT_FAMILY\"#g" \
+			-e "1,/<g[^>]*>/s#<g[^>]*>#<g opacity=\"$OPACITY\">#" | \
+		"$BASEDIR/usvg" \
+			--quiet \
+			--indent 0 \
+			--skip-system-fonts \
+			--use-fonts-dir "$FINDWIND_FONTS_DIR" \
+			- "$1" || {
+		croak 'failed to render SVG text'
+		return 1
+	}
+}
+
+create_tmp_svg_file() {
+	mktemp "${TMPDIR:-/tmp}/findwind-svg-XXXXXX"
+}
+
+# Deletes the current overlay and uploaded image (if any) and removes the
+# temporary SVG file.
+cleanup_resources() {
+	[ -n "${ID:-}" ] && delete_overlay "$ID" 1> /dev/null || true
+	[ -n "${CURRENT_OVERLAY_PATH:-}" ] && delete_image "$CURRENT_OVERLAY_PATH" 1> /dev/null || true
+	[ -n "${TMP_SVG_PATH:-}" ] && [ -f "$TMP_SVG_PATH" ] && rm -f "$TMP_SVG_PATH" || true
+	TMP_SVG_PATH=
+	CURRENT_OVERLAY_PATH=
+	ID=
+}
+
+# Cleanup function to be called on script exit, which ensures that all
+# resources are properly released and the script exits with a success status.
+cleanup_and_exit() {
+	trap - EXIT INT TERM QUIT HUP
+	cleanup_resources
+	exit 0
+}
+
+OPACITY=$(get_param Opacity)
+STYLE=$(get_param Style)
+SPOT=$(get_param FindwindSpotID)
+OVERLAY_POSITION=$(get_param Position)
+CUSTOM_POSITION_X=$(get_param CustomPositionX)
+CUSTOM_POSITION_Y=$(get_param CustomPositionY)
+
+[ "$OVERLAY_POSITION" = "custom" ] && OVERLAY_POSITION=Custom
+
+if [ "$OVERLAY_POSITION" = 'Custom' ]; then
+	jq -ne \
+		--arg x "$CUSTOM_POSITION_X" \
+		--arg y "$CUSTOM_POSITION_Y" \
+		'($x|tonumber) as $vx | ($y|tonumber) as $vy | ($vx >= -1.0 and $vx <= 1.0 and $vy >= -1.0 and $vy <= 1.0)' >/dev/null || {
+		croak "custom position requires coordinates in range [-1.0, 1.0]"
+		exit 1
+	}
+fi
+
+TMP_SVG_PATH=
+CURRENT_OVERLAY_PATH=
+ID=
+
+# Cleanup any leftover temporary files from previous runs, in case of unclean
+# exit
+find "${TMPDIR:-/tmp}" -maxdepth 1 -type f -name 'findwind-*' -delete > /dev/null 2>&1 || true
+
+# Add cleanup trap to ensure resources are released on exit or interruption
+trap cleanup_resources EXIT
+trap cleanup_and_exit INT TERM QUIT HUP
+
+echo 'Fetching initial FindWind SVG ...'
+while true; do
+	TMP_SVG_PATH=$(create_tmp_svg_file)
+	if ! download_svg "$TMP_SVG_PATH"; then
+		rm -f "$TMP_SVG_PATH"
+		TMP_SVG_PATH=
+		croak "initial download failed, retrying in $FETCH_RETRY_DELAY s"
+		sleep "$FETCH_RETRY_DELAY"
+		continue
+	fi
+
+	CURRENT_OVERLAY_PATH=$(upload_image "$TMP_SVG_PATH" image/svg+xml)
+	rm -f "$TMP_SVG_PATH"
+	TMP_SVG_PATH=
+	[ -n "$CURRENT_OVERLAY_PATH" ] || {
+		croak "initial upload returned no overlay path, retrying in $FETCH_RETRY_DELAY s"
+		sleep "$FETCH_RETRY_DELAY"
+		continue
+	}
+
+	ADD_RESPONSE=$(add_overlay "$CURRENT_OVERLAY_PATH") || {
+		croak "failed to add overlay, retrying in $FETCH_RETRY_DELAY s"
+		delete_image "$CURRENT_OVERLAY_PATH" 1> /dev/null || :
+		CURRENT_OVERLAY_PATH=
+		sleep "$FETCH_RETRY_DELAY"
+		continue
+	}
+
+	ID=$(echo "$ADD_RESPONSE" | jq -r '.data.identity // empty')
+	[ "$ID" ] || {
+		croak "add overlay returned no identity, retrying in $FETCH_RETRY_DELAY s"
+		delete_image "$CURRENT_OVERLAY_PATH" 1> /dev/null || :
+		CURRENT_OVERLAY_PATH=
+		sleep "$FETCH_RETRY_DELAY"
+		continue
+	}
+
+	break
+done
+
+echo "Overlay identity: $ID"
+if [ "$OVERLAY_POSITION" = 'Custom' ]; then
+	echo "Overlay position: Custom (${CUSTOM_POSITION_X}, ${CUSTOM_POSITION_Y})"
+else
+	echo "Overlay position: $OVERLAY_POSITION"
+fi
+echo "Running (update interval: $UPDATE_INTERVAL s) ..."
+
+while true; do
+	TMP_SVG_PATH=$(create_tmp_svg_file)
+	if ! download_svg "$TMP_SVG_PATH"; then
+		rm -f "$TMP_SVG_PATH"
+		TMP_SVG_PATH=
+		croak "download failed, keeping previous overlay"
+		sleep "$UPDATE_INTERVAL"
+		continue
+	fi
+	NEW_OVERLAY_PATH=$(upload_image "$TMP_SVG_PATH" image/svg+xml)
+	rm -f "$TMP_SVG_PATH"
+	TMP_SVG_PATH=
+	[ "$NEW_OVERLAY_PATH" ] || {
+		croak 'no overlay path from upload, skipping update'
+		sleep "$UPDATE_INTERVAL"
+		continue
+	}
+
+	set_overlay_image "$ID" "$NEW_OVERLAY_PATH" || {
+		croak 'failed to update overlay image, keeping previous overlay'
+		delete_image "$NEW_OVERLAY_PATH" 1> /dev/null || :
+		sleep "$UPDATE_INTERVAL"
+		continue
+	}
+
+	delete_image "$CURRENT_OVERLAY_PATH" 1> /dev/null || :
+	CURRENT_OVERLAY_PATH=$NEW_OVERLAY_PATH
+	sleep "$UPDATE_INTERVAL"
+done

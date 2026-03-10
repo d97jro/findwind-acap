@@ -1,0 +1,55 @@
+{
+    "schemaVersion": "1.8.0",
+    "acapPackageConf": {
+        "setup": {
+            "appName": "findwind",
+            "friendlyName": "Findwind Overlay",
+            "vendor": "Joakim Roubert",
+            "vendorUrl": "https://github.com/d97jro",
+            "embeddedSdkVersion": "3.0",
+            "runMode": "respawn",
+            "version": "1.0.0"
+        },
+        "configuration": {
+            "paramConfig": [
+                {
+                    "name": "FindwindSpotID",
+                    "type": "int:min=1",
+                    "default": "301"
+                },
+                {
+                    "name": "Style",
+                    "type": "enum:1A|Round corners with border, 1B|Round corners no border, 1C|Square corners with border",
+                    "default": "1A"
+                },
+                {
+                    "name": "Opacity",
+                    "type": "double:min=0,max=1",
+                    "default": "0.7"
+                },
+                {
+                    "name": "Position",
+                    "type": "enum:topLeft|Top left, topRight|Top right, bottomLeft|Bottom left, bottomRight|Bottom right, custom|Custom position",
+                    "default": "topLeft"
+                },
+                {
+                    "name": "CustomPositionX",
+                    "type": "double:min=-1,max=1",
+                    "default": "0"
+                },
+                {
+                    "name": "CustomPositionY",
+                    "type": "double:min=-1,max=1",
+                    "default": "0"
+                }
+            ]
+        }
+    },
+    "resources": {
+        "dbus": {
+            "requiredMethods": [
+                "com.axis.HTTPConf1.VAPIXServiceAccounts1.GetCredentials"
+            ]
+        }
+    }
+}
