@@ -17,7 +17,10 @@ jobs:
       - uses: actions/checkout@v6
       # Test all Makefile targets and make sure the ACAP files are created
       - name: Build
-        run: make -j ${{ matrix.builder }}build
+        run: |
+          # Podman needs more file descriptors
+          ulimit -n 65536
+          make -j ${{ matrix.builder }}build
       - name: Verify
         run: |
           for f in *.eap; do
