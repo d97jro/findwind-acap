@@ -24,13 +24,13 @@ RUN apk add --no-cache \
         zig
 RUN cargo install --locked cargo-zigbuild
 RUN rustup target add "$RUST_TARGET"
-WORKDIR "$STAGE_DIR"
 WORKDIR "$RESVG_DIR"
 SHELL ["/bin/bash", "-o", "pipefail", "-c"]
 # hadolint ignore=DL3047
 RUN wget -O- https://github.com/linebender/resvg/releases/download/v$RESVG_VERSION/resvg-$RESVG_VERSION.tar.xz | tar -xJ --strip-components=1
-RUN RUSTFLAGS='-C strip=symbols' cargo zigbuild --release --locked --manifest-path crates/usvg/Cargo.toml --target "$RUST_TARGET" && \
-    cp "target/$RUST_TARGET/release/usvg" "$STAGE_DIR/"
+RUN RUSTFLAGS='-C strip=symbols' cargo zigbuild --release --locked --manifest-path crates/usvg/Cargo.toml --target "$RUST_TARGET"
+WORKDIR "$STAGE_DIR"
+RUN cp "$RESVG_DIR/target/$RUST_TARGET/release/usvg" .
 
 FROM $SDK_IMAGE:$ACAP_SDK_VERSION-$ARCH AS builder
 ARG STAGE_DIR
