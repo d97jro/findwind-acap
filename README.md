@@ -3,7 +3,14 @@
 [![Build ACAP packages](https://github.com/d97jro/findwind-acap/actions/workflows/build.yml/badge.svg)](https://github.com/d97jro/findwind-acap/actions/workflows/build.yml)
 [![GitHub Super-Linter](https://github.com/d97jro/findwind-acap/actions/workflows/linter.yml/badge.svg)](https://github.com/d97jro/findwind-acap/actions/workflows/linter.yml)
 
-This repository contains the source code to build a small example [ACAP version 4](https://axiscommunications.github.io/acap-documentation/) (native) application that overlays wind information from [FindWind](https://findwind.se) on Axis camera video streams.
+**This repository contains the source code to build a small example
+[ACAP version 4](https://axiscommunications.github.io/acap-documentation/)
+(native) application that overlays wind information from
+[FindWind](https://findwind.se) on
+[Axis camera](https://www.axis.com/products/network-cameras)
+video streams.**
+
+![Camera stream screenshot](images/screenshot.jpg)
 
 ## Build
 
