@@ -16,6 +16,7 @@
 - Use double quotes only when there is variable expansion; use single quotes for static strings.
 - Never use braces around variable names unless there is a substitution or to prevent ambiguity (e.g., `${FOO}bar`).
 - Wrap comments to not exceed 80 characters per line.
+- Do not use consecutive echo commands; use a single echo with newlines instead.
 
 ## For Dockerfiles
 

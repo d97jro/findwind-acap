@@ -136,7 +136,7 @@ add_overlay() {
 		--arg position "$OVERLAY_POSITION" \
 		--arg custom_x "$CUSTOM_POSITION_X" \
 		--arg custom_y "$CUSTOM_POSITION_Y" \
-		'{"apiVersion":"1.0","method":"addImage","params":{"camera":1,"position":(if $position == "Custom" then [($custom_x|tonumber),($custom_y|tonumber)] else $position end),"overlayPath":$overlay_path}}') || {
+		'{"apiVersion":"1.0","method":"addImage","params":{"camera":1,"position":(if $position == "custom" then [($custom_x|tonumber),($custom_y|tonumber)] else $position end),"overlayPath":$overlay_path}}') || {
 		croak "failed to construct addImage payload"
 		return 1
 	}
@@ -171,7 +171,7 @@ set_overlay_image() {
 		--arg position "$OVERLAY_POSITION" \
 		--arg custom_x "$CUSTOM_POSITION_X" \
 		--arg custom_y "$CUSTOM_POSITION_Y" \
-		'{"apiVersion":"1.0","method":"setImage","params":{"camera":1,"identity":($identity|tonumber),"overlayPath":$overlay_path,"position":(if $position == "Custom" then [($custom_x|tonumber),($custom_y|tonumber)] else $position end)}}') || {
+		'{"apiVersion":"1.0","method":"setImage","params":{"camera":1,"identity":($identity|tonumber),"overlayPath":$overlay_path,"position":(if $position == "custom" then [($custom_x|tonumber),($custom_y|tonumber)] else $position end)}}') || {
 		croak "failed to construct setImage payload"
 		return 1
 	}
@@ -258,9 +258,7 @@ OVERLAY_POSITION=$(get_param Position)
 CUSTOM_POSITION_X=$(get_param CustomPositionX)
 CUSTOM_POSITION_Y=$(get_param CustomPositionY)
 
-[ "$OVERLAY_POSITION" = "custom" ] && OVERLAY_POSITION=Custom
-
-if [ "$OVERLAY_POSITION" = 'Custom' ]; then
+if [ "$OVERLAY_POSITION" = 'custom' ]; then
 	jq -ne \
 		--arg x "$CUSTOM_POSITION_X" \
 		--arg y "$CUSTOM_POSITION_Y" \
@@ -323,12 +321,10 @@ while true; do
 done
 
 echo "Overlay identity: $ID"
-if [ "$OVERLAY_POSITION" = 'Custom' ]; then
-	echo "Overlay position: Custom (${CUSTOM_POSITION_X}, ${CUSTOM_POSITION_Y})"
-else
-	echo "Overlay position: $OVERLAY_POSITION"
-fi
-echo "Running (update interval: $UPDATE_INTERVAL s) ..."
+position_suffix=
+[ "$OVERLAY_POSITION" = 'custom' ] && position_suffix=" ($CUSTOM_POSITION_X, $CUSTOM_POSITION_Y)"
+echo "Overlay position: $OVERLAY_POSITION$position_suffix
+Running (update interval: $UPDATE_INTERVAL s) ..."
 
 while true; do
 	TMP_SVG_PATH=$(create_tmp_svg_file)
