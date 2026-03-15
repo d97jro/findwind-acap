@@ -60,17 +60,34 @@ podman build --build-arg ARCH=aarch64 -o type=local,dest=. .
 
 ## Setup
 
+> [!IMPORTANT]
+> The current implementation only retrieves application settings upon startup,
+> so if you change a parameter you will have to restart the application for
+> them to come into effect.
+
 ### Manual installation and configuration
 
 Upload the ACAP application file (the file with the `.eap` extension for the camera's architecture) through the camera's web UI: *Apps->Add app*
 
 When installed, start the application.
 
-Open the application's settings page in the web interface (available when the application is running) by clicking the *Open* button.
+Open the application's settings dialog in the web interface by clicking the
+three vertical dots button.
+
+![Open settings menu screenshot](images/open_settings.png)
 
 In the settings page you can configure the FindWind spot ID, style, opacity, and position of the overlay.
 
-These values can also be set directly through the application's parameter settings, found in the three vertical dots menu.
+![Settings screenshot, position topLeft](images/settings_topleft.png)
+
+> [!IMPORTANT]
+> If you use a custom position (and none of the predefined
+> *topLeft/topRight/bottomLeft/bottomRight*), the anchor point is the
+> overlay's upper left corner. The coordinates range from (-1.0, -1.0),
+> being the upper left corner of the screen, and (1.0, 1.0) being the
+> bottom right corner of the screen.
+
+![Settings screenshot, custom position](images/settings_custom.png)
 
 ### Scripted installation and configuration
 
@@ -108,6 +125,17 @@ root.findwind.Position=topLeft
 root.findwind.CustomPositionX=0
 root.findwind.CustomPositionY=0
 ```
+
+> [!TIP]
+> The *Style* value follows FindWind definitions:
+>
+> *1A* = Round corners with border  
+> *1B* = Round corners no border  
+> *1C* = Square corners with border
+>
+> Valid values for *Position* are
+> *topLeft/topRight/bottomLeft/bottomRight/custom* and *CustomPositionX*
+> and *CustomPositionY* must be within the range -1.0 to 1.0.
 
 If you want to set the opacity to e.g. 0.8:
 
