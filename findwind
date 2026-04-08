@@ -89,6 +89,46 @@ get_param() {
 	echo "${response#*=}"
 }
 
+# Mitigate parameter handling system race condition on startup
+get_non_empty_param() {
+	[ "$#" -eq 1 ] || {
+		croak "expected 1 parameter but got $#"
+		return 1
+	}
+	while true; do
+		value=$(get_param "$1")
+		# If we have a value, we are done!
+		[ ! "$value" ] || break
+		croak "Retrieved value for parameter $1 is empty, will try again until non-empty"
+		usleep 500000 || sleep 1
+	done
+	echo "$value"
+}
+
+# Get the current position settings
+get_current_position() {
+	overlay_position=$(get_non_empty_param Position)
+	custom_position_x=$(get_non_empty_param CustomPositionX)
+	custom_position_y=$(get_non_empty_param CustomPositionY)
+
+	# No updates => no further action
+	[ "${OVERLAY_POSITION:-}" = "$overlay_position" ] && [ "${CUSTOM_POSITION_X:-}" = "$custom_position_x" ] && [ "${CUSTOM_POSITION_Y:-}" = "$custom_position_y" ] && return
+
+	# Make sure the custom position values are OK if we are using them
+	if [ "$overlay_position" = 'custom' ]; then
+		jq -ne \
+			--arg x "$custom_position_x" \
+			--arg y "$custom_position_y" \
+			'($x|tonumber) as $vx | ($y|tonumber) as $vy | ($vx >= -1.0 and $vx <= 1.0 and $vy >= -1.0 and $vy <= 1.0)' >/dev/null || {
+			croak "custom position requires coordinates in range [-1.0, 1.0]"
+			return 1
+		}
+	fi
+	OVERLAY_POSITION=$overlay_position
+	CUSTOM_POSITION_X=$custom_position_x
+	CUSTOM_POSITION_Y=$custom_position_y
+}
+
 # Uploads an image file to the camera using VAPIX and returns the overlay path.
 # It takes two input arguments: the file path of the image to upload and its
 # MIME type.
@@ -131,6 +171,7 @@ add_overlay() {
 		return 1
 	}
 
+	get_current_position || return 1
 	payload=$(jq -nc \
 		--arg overlay_path "$1" \
 		--arg position "$OVERLAY_POSITION" \
@@ -165,6 +206,7 @@ set_overlay_image() {
 		return 1
 	}
 
+	get_current_position || return 1
 	payload=$(jq -nc \
 		--arg identity "$1" \
 		--arg overlay_path "$2" \
@@ -200,7 +242,7 @@ download_svg() {
 		return 1
 	}
 
-	svg=$($FINDWIND_CURLCMD "https://findwind.se/svg/Compound_${STYLE}_$SPOT.svg" 2>&1) || {
+	svg=$($FINDWIND_CURLCMD "https://findwind.se/svg/Compound_$(get_non_empty_param Style)_$(get_non_empty_param FindwindSpotID).svg" 2>&1) || {
 		echo "Error: failed to download SVG ($svg)" >&2
 		return 1
 	}
@@ -216,7 +258,7 @@ download_svg() {
 	echo "$svg" | \
 		sed -e "s#\(font-family='\)[^']*'#\1$FONT_FAMILY'#g" \
 			-e "s#\(font-family=\"\)[^\"]*\"#\1$FONT_FAMILY\"#g" \
-			-e "1,/<g[^>]*>/s#<g[^>]*>#<g opacity=\"$OPACITY\">#" | \
+			-e "1,/<g[^>]*>/s#<g[^>]*>#<g opacity=\"$(get_non_empty_param Opacity)\">#" | \
 		"$BASEDIR/usvg" \
 			--quiet \
 			--indent 0 \
@@ -250,23 +292,6 @@ cleanup_and_exit() {
 	cleanup_resources
 	exit 0
 }
-
-OPACITY=$(get_param Opacity)
-STYLE=$(get_param Style)
-SPOT=$(get_param FindwindSpotID)
-OVERLAY_POSITION=$(get_param Position)
-CUSTOM_POSITION_X=$(get_param CustomPositionX)
-CUSTOM_POSITION_Y=$(get_param CustomPositionY)
-
-if [ "$OVERLAY_POSITION" = 'custom' ]; then
-	jq -ne \
-		--arg x "$CUSTOM_POSITION_X" \
-		--arg y "$CUSTOM_POSITION_Y" \
-		'($x|tonumber) as $vx | ($y|tonumber) as $vy | ($vx >= -1.0 and $vx <= 1.0 and $vy >= -1.0 and $vy <= 1.0)' >/dev/null || {
-		croak "custom position requires coordinates in range [-1.0, 1.0]"
-		exit 1
-	}
-fi
 
 TMP_SVG_PATH=
 CURRENT_OVERLAY_PATH=
@@ -320,10 +345,7 @@ while true; do
 	break
 done
 
-echo "Overlay identity: $ID"
-position_suffix=
-[ "$OVERLAY_POSITION" = 'custom' ] && position_suffix=" ($CUSTOM_POSITION_X, $CUSTOM_POSITION_Y)"
-echo "Overlay position: $OVERLAY_POSITION$position_suffix
+echo "Overlay identity: $ID
 Running (update interval: $UPDATE_INTERVAL s) ..."
 
 while true; do

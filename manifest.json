@@ -8,7 +8,7 @@
             "vendorUrl": "https://github.com/d97jro",
             "embeddedSdkVersion": "3.0",
             "runMode": "respawn",
-            "version": "1.0.0"
+            "version": "1.0.1"
         },
         "configuration": {
             "paramConfig": [
