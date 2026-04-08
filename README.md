@@ -61,9 +61,9 @@ podman build --build-arg ARCH=aarch64 -o type=local,dest=. .
 ## Setup
 
 > [!IMPORTANT]
-> The current implementation only retrieves application settings upon startup,
-> so if you change a parameter you will have to restart the application for
-> them to come into effect.
+> Changes to the application settings will take effect during the next
+> scheduled forecast update. If you want them to apply immediately, you will
+> need to restart the application.
 
 ### Manual installation and configuration
 
