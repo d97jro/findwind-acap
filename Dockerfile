@@ -1,9 +1,9 @@
 ARG ARCH=aarch64
-ARG ACAP_SDK_VERSION=12.9.0
+ARG ACAP_SDK_VERSION=12.10.0
 ARG SDK_IMAGE=docker.io/axisecp/acap-native-sdk
 ARG STAGE_DIR=/opt/stage
-ARG RESVG_VERSION=0.45.1
-ARG RUST_VERSION=1.94
+ARG RESVG_VERSION=0.47.0
+ARG RUST_VERSION=1.96
 
 FROM docker.io/rust:$RUST_VERSION-alpine AS rust-builder-aarch64
 ENV RUST_TARGET=aarch64-unknown-linux-musl
