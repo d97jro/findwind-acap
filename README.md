@@ -118,12 +118,13 @@ curl -k --anyauth -u root:<password> \
 will list the current settings:
 
 ```sh
-root.findwind.FindwindSpotID=301
-root.findwind.Style=1A
-root.findwind.Opacity=0.7
-root.findwind.Position=topLeft
-root.findwind.CustomPositionX=0
-root.findwind.CustomPositionY=0
+root.Findwind.CustomPositionX=0
+root.Findwind.CustomPositionY=0
+root.Findwind.FindwindSpotID=301
+root.Findwind.Opacity=0.7
+root.Findwind.Position=topLeft
+root.Findwind.Scale=100
+root.Findwind.Style=1A
 ```
 
 > [!TIP]
@@ -137,12 +138,17 @@ root.findwind.CustomPositionY=0
 > *topLeft/topRight/bottomLeft/bottomRight/custom* and *CustomPositionX*
 > and *CustomPositionY* must be within the range -1.0 to 1.0.
 
-If you want to set the opacity to e.g. 0.8:
+If you want to set the style to e.g. 1B:
 
 ```sh
 curl -k --anyauth -u root:<password> \
-    'https://<camera hostname/ip>/axis-cgi/param.cgi?action=update&root.findwind.Opacity=0.8'
+    'https://<camera hostname/ip>/axis-cgi/param.cgi?action=update&root.findwind.Style=1B'
 ```
+
+> [!TIP]
+> The *Scale* parameter is a percentage value that scales the overlay size.
+> For example, a scale of 200 will double the size of the overlay, while
+> a scale of 50 will reduce it to half size.
 
 ## Usage
 
