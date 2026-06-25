@@ -258,19 +258,33 @@ download_svg() {
 	# Replace font-family with a known sans-serif font to improve chances of correct rendering (since the original font may not be available in the container)
 	# and set opacity on the first <g...> tag regardless of existing attributes.
 	opacity=$(get_non_empty_param Opacity)
-	echo "$svg" | \
-		sed -e "s#\(font-family='\)[^']*'#\1$FONT_FAMILY'#g" \
-			-e "s#\(font-family=\"\)[^\"]*\"#\1$FONT_FAMILY\"#g" \
-			-e "1,/<g[^>]*>/s#<g[^>]*>#<g opacity=\"$opacity\">#" | \
+	svg=$(echo "$svg" |sed -e "s#\(font-family='\)[^']*'#\1$FONT_FAMILY'#g" \
+		-e "s#\(font-family=\"\)[^\"]*\"#\1$FONT_FAMILY\"#g" \
+		-e "1,/<g[^>]*>/s#<g[^>]*>#<g opacity=\"$opacity\">#" | \
 		"$BASEDIR/usvg" \
 			--quiet \
 			--indent 0 \
 			--skip-system-fonts \
 			--use-fonts-dir "$FINDWIND_FONTS_DIR" \
-			- "$1" || {
+			- -c) || {
 		croak 'failed to render SVG text'
 		return 1
 	}
+
+	# Handle eventual scaling (with the consistent usvg output, strict format
+	# assumptions works and simplifies substitions).
+	scale=$(get_non_empty_param Scale)
+	[ "$scale" -eq 100 ] || {
+		dimensions=${svg%% xmlns*}
+		width=${dimensions##*width=\"}
+		width=${width%%\"*}
+		height=${dimensions##*height=\"}
+		height=${height%%\"*}
+		newwidth=$((width * scale / 100))
+		newheight=$((height * scale / 100))
+		svg=$(echo "$svg" |sed "s/<svg width=\"$width\" height=\"$height\" xmlns/<svg width=\"$newwidth\" height=\"$newheight\" viewBox=\"0 0 $width $height\" xmlns/")
+	}
+	echo "$svg" > "$1"
 }
 
 create_tmp_svg_file() {

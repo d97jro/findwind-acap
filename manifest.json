@@ -8,7 +8,7 @@
             "vendorUrl": "https://github.com/d97jro",
             "vendorId": "1234567890",
             "runMode": "respawn",
-            "version": "1.1.1",
+            "version": "1.1.2",
             "compatibleOsVersions": [
                 {
                     "max": "13"
@@ -36,6 +36,11 @@
                     "name": "Position",
                     "type": "enum:topLeft|Top left, topRight|Top right, bottomLeft|Bottom left, bottomRight|Bottom right, custom|Custom position",
                     "default": "topLeft"
+                },
+                {
+                    "name": "Scale",
+                    "type": "int:min=10,max=900",
+                    "default": "100"
                 },
                 {
                     "name": "CustomPositionX",
