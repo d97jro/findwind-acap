@@ -58,7 +58,7 @@ check_json_response() {
 		return 1
 	}
 
-	error=$(echo "$1" | jq -r '.error.message // empty')
+	error=$(echo "$1" |jq -r '.error.message // empty')
 	[ -z "$error" ] || {
 		croak "$error"
 		return 1
@@ -150,7 +150,7 @@ upload_image() {
 
 	# Print to stderr to not contaminate output used for API call
 	echo "Uploading $1 ..." >&2
-	response=$(echo '{"apiVersion":"1.0","method":"uploadOverlayImage","params":{"scaleToResolution":true}}' | $CURLCMD --http1.0 -H 'Expect:' -F 'json=@-;type=application/json' -F "image=@$1;type=$2" "$BASEURL"/uploadoverlayimage.cgi) || {
+	response=$(echo '{"apiVersion":"1.0","method":"uploadOverlayImage","params":{"scaleToResolution":true}}' |$CURLCMD --http1.0 -H 'Expect:' -F 'json=@-;type=application/json' -F "image=@$1;type=$2" "$BASEURL"/uploadoverlayimage.cgi) || {
 		croak "curl command failed ($response)"
 		return 1
 	}
@@ -159,7 +159,7 @@ upload_image() {
 		return 1
 	}
 
-	echo "$checked_response" | jq -r '.data.path // empty'
+	echo "$checked_response" |jq -r '.data.path // empty'
 }
 
 # Adds an overlay to the camera using the provided overlay path and position settings.
@@ -238,27 +238,30 @@ delete_overlay() {
 # failure.
 download_svg() {
 	[ $# -eq 1 ] || {
-		echo "Error: expected 1 parameter but got $#" >&2
+		croak "expected 1 parameter but got $#"
 		return 1
 	}
 
-	svg=$($FINDWIND_CURLCMD "https://findwind.se/svg/Compound_$(get_non_empty_param Style)_$(get_non_empty_param FindwindSpotID).svg" 2>&1) || {
-		echo "Error: failed to download SVG ($svg)" >&2
+	style=$(get_non_empty_param Style)
+	spotid=$(get_non_empty_param FindwindSpotID)
+	svg=$($FINDWIND_CURLCMD "https://findwind.se/svg/Compound_${style}_$spotid.svg" 2>&1) || {
+		croak "failed to download SVG ($svg)"
 		return 1
 	}
 
-	echo "$svg" | grep -q '<svg' || {
-		echo "Error: downloaded content is not valid SVG" >&2
+	echo "$svg" |grep -q '<svg' || {
+		croak "downloaded content is not valid SVG"
 		return 1
 	}
 
 	# Render fonts to vectors (since the camera overlay system doesn't do font rendering)
 	# Replace font-family with a known sans-serif font to improve chances of correct rendering (since the original font may not be available in the container)
 	# and set opacity on the first <g...> tag regardless of existing attributes.
+	opacity=$(get_non_empty_param Opacity)
 	echo "$svg" | \
 		sed -e "s#\(font-family='\)[^']*'#\1$FONT_FAMILY'#g" \
 			-e "s#\(font-family=\"\)[^\"]*\"#\1$FONT_FAMILY\"#g" \
-			-e "1,/<g[^>]*>/s#<g[^>]*>#<g opacity=\"$(get_non_empty_param Opacity)\">#" | \
+			-e "1,/<g[^>]*>/s#<g[^>]*>#<g opacity=\"$opacity\">#" | \
 		"$BASEDIR/usvg" \
 			--quiet \
 			--indent 0 \
@@ -333,7 +336,7 @@ while true; do
 		continue
 	}
 
-	ID=$(echo "$ADD_RESPONSE" | jq -r '.data.identity // empty')
+	ID=$(echo "$ADD_RESPONSE" |jq -r '.data.identity // empty')
 	[ "$ID" ] || {
 		croak "add overlay returned no identity, retrying in $FETCH_RETRY_DELAY s"
 		delete_image "$CURRENT_OVERLAY_PATH" 1> /dev/null || :
