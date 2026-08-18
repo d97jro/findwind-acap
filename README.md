@@ -125,6 +125,7 @@ root.Findwind.Opacity=0.7
 root.Findwind.Position=topLeft
 root.Findwind.Scale=100
 root.Findwind.Style=1A
+root.Findwind.TargetCamera=1
 ```
 
 > [!TIP]
