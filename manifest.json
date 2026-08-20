@@ -4,8 +4,8 @@
         "setup": {
             "appName": "findwind",
             "friendlyName": "Findwind Overlay",
-            "vendor": "joakim.roubert@axis.com",
-            "vendorId": "682ace246a",
+            "vendor": "joakim.roubert@gmail.com",
+            "vendorId": "4427158db3",
             "vendorUrl": "https://github.com/d97jro",
             "runMode": "respawn",
             "version": "1.1.3",
