@@ -235,25 +235,22 @@ delete_overlay() {
 	request_json "{\"apiVersion\": \"1.0\", \"method\": \"remove\", \"params\": { \"identity\": $1}}" dynamicoverlay/dynamicoverlay.cgi 1>/dev/null
 }
 
-# Downloads the SVG content from the FindWind service, processes it to render
-# fonts as vectors, and saves the resulting SVG to the temporary file stated
-# in the input argument. Prints an error message to stderr and returns 1 upon
-# failure.
-download_svg() {
-	[ $# -eq 1 ] || {
-		croak "expected 1 parameter but got $#"
+# Renders fonts as vectors and applies scaling to an SVG file.
+# It takes two input arguments: the input SVG file path and the output file path.
+# Prints an error message to stderr and returns 1 upon failure.
+render_and_scale_svg() {
+	[ $# -eq 2 ] || {
+		croak "expected 2 parameters but got $#"
 		return 1
 	}
 
-	style=$(get_non_empty_param Style)
-	spotid=$(get_non_empty_param FindwindSpotID)
-	svg=$($FINDWIND_CURLCMD "https://findwind.se/svg/Compound_${style}_$spotid.svg" 2>&1) || {
-		croak "failed to download SVG ($svg)"
+	[ -f "$1" ] || {
+		croak "input file $1 does not exist"
 		return 1
 	}
 
-	echo "$svg" |grep -q '<svg' || {
-		croak "downloaded content is not valid SVG"
+	svg=$(cat "$1") || {
+		croak "failed to read SVG from $1"
 		return 1
 	}
 
@@ -287,7 +284,43 @@ download_svg() {
 		newheight=$((height * scale / 100))
 		svg=$(echo "$svg" |sed "s/<svg width=\"$width\" height=\"$height\" xmlns/<svg width=\"$newwidth\" height=\"$newheight\" viewBox=\"0 0 $width $height\" xmlns/")
 	}
-	echo "$svg" > "$1"
+	echo "$svg" > "$2"
+}
+
+# Downloads the SVG content from the FindWind service and saves it to a temporary
+# file, then applies rendering and scaling. It takes one input argument: the output
+# file path. Prints an error message to stderr and returns 1 upon failure.
+download_svg() {
+	[ $# -eq 1 ] || {
+		croak "expected 1 parameter but got $#"
+		return 1
+	}
+
+	style=$(get_non_empty_param Style)
+	spotid=$(get_non_empty_param FindwindSpotID)
+	tmp_download=$(mktemp) || {
+		croak "failed to create temporary file"
+		return 1
+	}
+
+	svg=$($FINDWIND_CURLCMD "https://findwind.se/svg/Compound_${style}_$spotid.svg" 2>&1) || {
+		rm -f "$tmp_download"
+		croak "failed to download SVG ($svg)"
+		return 1
+	}
+
+	echo "$svg" |grep -q '<svg' || {
+		rm -f "$tmp_download"
+		croak "downloaded content is not valid SVG"
+		return 1
+	}
+
+	echo "$svg" > "$tmp_download"
+	render_and_scale_svg "$tmp_download" "$1" || {
+		rm -f "$tmp_download"
+		return 1
+	}
+	rm -f "$tmp_download"
 }
 
 create_tmp_svg_file() {
@@ -325,20 +358,39 @@ find "${TMPDIR:-/tmp}" -maxdepth 1 -type f -name 'findwind-*' -delete > /dev/nul
 trap cleanup_resources EXIT
 trap cleanup_and_exit INT TERM QUIT HUP
 
+# Get initial Style parameter to use local init SVG file
+style=$(get_non_empty_param Style)
+init_svg_path="$BASEDIR/Compound_${style}_init.svg"
+
+# Use local init SVG file for initial overlay
 while true; do
-	echo 'Fetching FindWind SVG ...'
+	echo 'Setting initial placeholder FindWind SVG ...'
+
+	[ -f "$init_svg_path" ] || {
+		croak "local init SVG not found at expected $init_svg_path"
+		exit 1
+	}
+
 	TMP_SVG_PATH=$(create_tmp_svg_file)
-	if ! download_svg "$TMP_SVG_PATH"; then
+	render_and_scale_svg "$init_svg_path" "$TMP_SVG_PATH" || {
 		rm -f "$TMP_SVG_PATH"
 		TMP_SVG_PATH=
-		croak "initial download failed, retrying in $FETCH_RETRY_DELAY s"
+		croak "initial SVG processing failed, retrying in $FETCH_RETRY_DELAY s"
 		sleep "$FETCH_RETRY_DELAY"
 		continue
-	fi
+	}
 
-	CURRENT_OVERLAY_PATH=$(upload_image "$TMP_SVG_PATH" image/svg+xml)
+	CURRENT_OVERLAY_PATH=$(upload_image "$TMP_SVG_PATH" image/svg+xml) || {
+		rm -f "$TMP_SVG_PATH"
+		TMP_SVG_PATH=
+		croak "initial upload failed, retrying in $FETCH_RETRY_DELAY s"
+		sleep "$FETCH_RETRY_DELAY"
+		continue
+	}
+
 	rm -f "$TMP_SVG_PATH"
 	TMP_SVG_PATH=
+
 	[ -n "$CURRENT_OVERLAY_PATH" ] || {
 		croak "initial upload returned no overlay path, retrying in $FETCH_RETRY_DELAY s"
 		sleep "$FETCH_RETRY_DELAY"
