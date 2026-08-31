@@ -42,12 +42,15 @@ RUN cp /usr/share/fonts/truetype/liberation/LiberationSans-Bold.ttf .
 WORKDIR "$STAGE_DIR"
 COPY manifest.json \
      findwind \
+     images/Compound_1A_init.svg \
+     images/Compound_1B_init.svg \
+     images/Compound_1C_init.svg \
      LICENSE \
      ./
 COPY --from=rust-builder "$STAGE_DIR/usvg" ./
 RUN . /opt/axis/acapsdk/environment-setup* && \
     echo all: > Makefile && \
-    acap-build -a usvg -a fonts .
+    acap-build -a usvg -a fonts -a Compound_1A_init.svg -a Compound_1B_init.svg -a Compound_1C_init.svg .
 
 FROM scratch
 ARG STAGE_DIR
