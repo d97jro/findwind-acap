@@ -195,7 +195,9 @@ delete_image() {
 		return 1
 	}
 
-	request_json "{\"apiVersion\": \"1.0\", \"method\": \"deleteImage\", \"params\": { \"path\": \"$1\"}}" manageoverlayimages.cgi
+	printf 'Deleting image %s ... ' "$1"
+	request_json "{\"apiVersion\": \"1.0\", \"method\": \"deleteImage\", \"params\": { \"path\": \"$1\"}}" manageoverlayimages.cgi 1> /dev/null || return 1
+	echo 'OK'
 }
 
 # Updates the image of an existing overlay using the provided identity and new
@@ -232,7 +234,9 @@ delete_overlay() {
 		return 1
 	}
 
-	request_json "{\"apiVersion\": \"1.0\", \"method\": \"remove\", \"params\": { \"identity\": $1}}" dynamicoverlay/dynamicoverlay.cgi 1>/dev/null
+	printf 'Deleting overlay %s ... ' "$1"
+	request_json "{\"apiVersion\": \"1.0\", \"method\": \"remove\", \"params\": { \"identity\": $1}}" dynamicoverlay/dynamicoverlay.cgi 1>/dev/null || return 1
+	echo 'OK'
 }
 
 # Renders fonts as vectors and applies scaling to an SVG file.
@@ -327,12 +331,34 @@ create_tmp_svg_file() {
 	mktemp "${TMPDIR:-/tmp}/findwind-svg-XXXXXX"
 }
 
+# Purges any leftover overlays from previous runs that may have been created
+# by this application but not properly cleaned up (e.g. due to unclean exit).
+purge_leftover_overlays() {
+	overlays=$(request_json '{"apiVersion": "1.0", "method": "list", "params": {}}' dynamicoverlay/dynamicoverlay.cgi) || return 0
+	identities=$(echo "$overlays" |jq -r --arg prefix "$APPNAME" '.data.imageOverlays[]? | select((.overlayPath | split("/") | last) | startswith($prefix)) | .identity')
+	for id in $identities; do
+		echo "Found leftover overlay $id" >&2
+		delete_overlay "$id" || :
+	done
+}
+
+# Purges any leftover images from previous runs that may have been created
+# by this application but not properly cleaned up (e.g. due to unclean exit).
+purge_leftover_images() {
+	images=$(request_json '{"apiVersion": "1.0", "method": "listImages"}' manageoverlayimages.cgi) || return 0
+	paths=$(echo "$images" |jq -r --arg prefix "$APPNAME" '.data.files[]?.path | select((split("/") | last) | startswith($prefix))')
+	for path in $paths; do
+		echo "Found leftover overlay image $path" >&2
+		delete_image "$path" || :
+	done
+}
+
 # Deletes the current overlay and uploaded image (if any) and removes the
 # temporary SVG file.
 cleanup_resources() {
-	[ -n "${ID:-}" ] && delete_overlay "$ID" 1> /dev/null || true
-	[ -n "${CURRENT_OVERLAY_PATH:-}" ] && delete_image "$CURRENT_OVERLAY_PATH" 1> /dev/null || true
-	[ -n "${TMP_SVG_PATH:-}" ] && [ -f "$TMP_SVG_PATH" ] && rm -f "$TMP_SVG_PATH" || true
+	[ -n "${ID:-}" ] && delete_overlay "$ID" || :
+	[ -n "${CURRENT_OVERLAY_PATH:-}" ] && delete_image "$CURRENT_OVERLAY_PATH" || :
+	[ -n "${TMP_SVG_PATH:-}" ] && [ -f "$TMP_SVG_PATH" ] && rm -f "$TMP_SVG_PATH" || :
 	TMP_SVG_PATH=
 	CURRENT_OVERLAY_PATH=
 	ID=
@@ -352,34 +378,37 @@ ID=
 
 # Cleanup any leftover temporary files from previous runs, in case of unclean
 # exit
-find "${TMPDIR:-/tmp}" -maxdepth 1 -type f -name 'findwind-*' -delete > /dev/null 2>&1 || true
+find "${TMPDIR:-/tmp}" -maxdepth 1 -type f -name 'findwind-*' -delete > /dev/null 2>&1 || :
 
 # Add cleanup trap to ensure resources are released on exit or interruption
 trap cleanup_resources EXIT
 trap cleanup_and_exit INT TERM QUIT HUP
+
+# Remove any leftovers from previous runs
+echo 'Purge any leftover overlays and images from previous runs ...'
+purge_leftover_overlays
+purge_leftover_images
 
 # Get initial Style parameter to use local init SVG file
 style=$(get_non_empty_param Style)
 init_svg_path="$BASEDIR/Compound_${style}_init.svg"
 
 # Use local init SVG file for initial overlay
+echo 'Preparing initial placeholder FindWind SVG ...'
+[ -f "$init_svg_path" ] || {
+	croak "local init SVG not found at expected $init_svg_path"
+	exit 1
+}
+TMP_SVG_PATH=$(create_tmp_svg_file)
+render_and_scale_svg "$init_svg_path" "$TMP_SVG_PATH" || {
+	rm -f "$TMP_SVG_PATH"
+	TMP_SVG_PATH=
+	croak 'initial SVG processing failed'
+	exit 1
+}
+
+# Upload initial placeholder FindWind SVG
 while true; do
-	echo 'Setting initial placeholder FindWind SVG ...'
-
-	[ -f "$init_svg_path" ] || {
-		croak "local init SVG not found at expected $init_svg_path"
-		exit 1
-	}
-
-	TMP_SVG_PATH=$(create_tmp_svg_file)
-	render_and_scale_svg "$init_svg_path" "$TMP_SVG_PATH" || {
-		rm -f "$TMP_SVG_PATH"
-		TMP_SVG_PATH=
-		croak "initial SVG processing failed, retrying in $FETCH_RETRY_DELAY s"
-		sleep "$FETCH_RETRY_DELAY"
-		continue
-	}
-
 	CURRENT_OVERLAY_PATH=$(upload_image "$TMP_SVG_PATH" image/svg+xml) || {
 		rm -f "$TMP_SVG_PATH"
 		TMP_SVG_PATH=
@@ -397,6 +426,13 @@ while true; do
 		continue
 	}
 
+	break
+done
+
+# Create the overlay on the camera using the initial image
+while true; do
+	echo 'Creating overlay ...'
+
 	ADD_RESPONSE=$(add_overlay "$CURRENT_OVERLAY_PATH") || {
 		croak "failed to add overlay, retrying in $FETCH_RETRY_DELAY s"
 		delete_image "$CURRENT_OVERLAY_PATH" 1> /dev/null || :
@@ -408,7 +444,7 @@ while true; do
 	ID=$(echo "$ADD_RESPONSE" |jq -r '.data.identity // empty')
 	[ "$ID" ] || {
 		croak "add overlay returned no identity, retrying in $FETCH_RETRY_DELAY s"
-		delete_image "$CURRENT_OVERLAY_PATH" 1> /dev/null || :
+		delete_image "$CURRENT_OVERLAY_PATH" || :
 		CURRENT_OVERLAY_PATH=
 		sleep "$FETCH_RETRY_DELAY"
 		continue
@@ -420,6 +456,7 @@ done
 echo "Overlay identity: $ID
 Running (update interval: $UPDATE_INTERVAL s) ..."
 
+# Start updating the overlay with the real FindWind SVG files for the specified spot
 while true; do
 	TMP_SVG_PATH=$(create_tmp_svg_file)
 	if ! download_svg "$TMP_SVG_PATH"; then
@@ -440,12 +477,12 @@ while true; do
 
 	set_overlay_image "$ID" "$NEW_OVERLAY_PATH" || {
 		croak 'failed to update overlay image, keeping previous overlay'
-		delete_image "$NEW_OVERLAY_PATH" 1> /dev/null || :
+		delete_image "$NEW_OVERLAY_PATH" || :
 		sleep "$UPDATE_INTERVAL"
 		continue
 	}
 
-	delete_image "$CURRENT_OVERLAY_PATH" 1> /dev/null || :
+	delete_image "$CURRENT_OVERLAY_PATH" || :
 	CURRENT_OVERLAY_PATH=$NEW_OVERLAY_PATH
 	sleep "$UPDATE_INTERVAL"
 done
