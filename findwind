@@ -327,8 +327,8 @@ download_svg() {
 	rm -f "$tmp_download"
 }
 
-create_tmp_svg_file() {
-	mktemp "${TMPDIR:-/tmp}/findwind-svg-XXXXXX"
+get_tmp_svg_filename() {
+	echo "${TMPDIR:-/tmp}/$APPNAME-$(hexdump -n 4 -e '4/1 "%02x"' /dev/urandom).svg"
 }
 
 # Purges any leftover overlays from previous runs that may have been created
@@ -378,7 +378,7 @@ ID=
 
 # Cleanup any leftover temporary files from previous runs, in case of unclean
 # exit
-find "${TMPDIR:-/tmp}" -maxdepth 1 -type f -name 'findwind-*' -delete > /dev/null 2>&1 || :
+find "${TMPDIR:-/tmp}" -maxdepth 1 -type f -name "$APPNAME-*" -delete > /dev/null 2>&1 || :
 
 # Add cleanup trap to ensure resources are released on exit or interruption
 trap cleanup_resources EXIT
@@ -399,7 +399,7 @@ echo 'Preparing initial placeholder FindWind SVG ...'
 	croak "local init SVG not found at expected $init_svg_path"
 	exit 1
 }
-TMP_SVG_PATH=$(create_tmp_svg_file)
+TMP_SVG_PATH=$(get_tmp_svg_filename)
 render_and_scale_svg "$init_svg_path" "$TMP_SVG_PATH" || {
 	rm -f "$TMP_SVG_PATH"
 	TMP_SVG_PATH=
@@ -458,7 +458,7 @@ Running (update interval: $UPDATE_INTERVAL s) ..."
 
 # Start updating the overlay with the real FindWind SVG files for the specified spot
 while true; do
-	TMP_SVG_PATH=$(create_tmp_svg_file)
+	TMP_SVG_PATH=$(get_tmp_svg_filename)
 	if ! download_svg "$TMP_SVG_PATH"; then
 		rm -f "$TMP_SVG_PATH"
 		TMP_SVG_PATH=
